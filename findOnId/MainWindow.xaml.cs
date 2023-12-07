@@ -18,16 +18,12 @@ namespace findOnId {
     /// Логика взаимодействия для MainWindow.xaml
     /// </summary>
     public partial class MainWindow : Window {
-        //заблочить таблицу?
-        public const bool LOCK_TABLE = true;
-        
         private readonly string PATH_CFG = @"config.cfg";
         private BindingList<findOnIdModels> _idDataList;
         private FileIOService _fileConfig;
         private bool isClickStart = false;
 
         private System.Threading.CancellationTokenSource tokenSource = new CancellationTokenSource();
-        ReadAndWrite _ReadAndWrite;
         Thread _writeThread;
 
         public MainWindow() {
@@ -45,8 +41,10 @@ namespace findOnId {
                 MessageBox.Show(ex.Message);
                 Close();
             }
-
-            tStatusBar.Text = "Открыто сохранение";
+            if (_fileConfig.getFileExists())
+                tStatusBar.Text = "Открыто сохранение";
+            else
+                tStatusBar.Text = "Сохранение не найденно, создаю пустое";
             //добавляем стартовые
             //_idDataList = new BindingList<findOnIdModels>(){
             //    new findOnIdModels(){id = "0x100000", numStart = 15},
@@ -54,12 +52,11 @@ namespace findOnId {
             //};
             dgListId.ItemsSource = _idDataList;//привязали список выше с используя BindingList
             _idDataList.ListChanged += _idDataList_ListChanged;//подпишемся на событие изменеия
-            if (LOCK_TABLE) {
+            if (UserParseLine.LOCK_TABLE) {
                 dgListId.IsEnabled = false;
             }
         }
-
-
+        
         //событие на изменение таблицы
         private void _idDataList_ListChanged(object sender, ListChangedEventArgs e) {
             // добавляем элементы по умолчанию
@@ -85,14 +82,7 @@ namespace findOnId {
         }
 
         //кнопка открыть/остановить
-        //private async void button1_Click(object sender, RoutedEventArgs e) {
         private void button1_Click(object sender, RoutedEventArgs e) {
-
-            //Thread currentThread = Thread.CurrentThread;
-
-            button1.IsEnabled = false;
-            var tasks = new ConcurrentBag<Task>();
-
             if (!isClickStart) {
                 isClickStart = true;
                 button1.Content = "Остановить";
@@ -107,30 +97,26 @@ namespace findOnId {
                     return;
                 }
                 progressBar1.Visibility = Visibility;
-                // работаем с файлом асинхронно
-                //await Task.Run(() => FindAndWrite(file), tokenSource.Token);
-                //await Task.Run(() => Test(file), tokenSource.Token);
                 // работаем с в другом потоке
-                _ReadAndWrite = new ReadAndWrite(openFileDialog.FileNames, openFileDialog.SafeFileNames, _idDataList);
+                ReadAndWrite _ReadAndWrite = new ReadAndWrite(openFileDialog.FileNames, openFileDialog.SafeFileNames, _idDataList);
                 _ReadAndWrite.eventEnd += eventThreadEnd;
                 _ReadAndWrite.eventProgressBar += eventProgressBar;
+                _ReadAndWrite.eventProgressBarMaxValue += eventProgressBarMaxValue;
                 _ReadAndWrite.eventGetFileName += eventThatFile;
                 _writeThread = new Thread(new ThreadStart(_ReadAndWrite.ReadAndWriteThread));
                 _writeThread.Start();
 
             } else {
                 //экстренно завершим задачу
-                // Thread.Abort
-                //tokenSource.Cancel();
-                //tokenSource.Dispose();
-                tStatusBar.Text = "Отменено";
+                _writeThread.Abort();
+                _writeThread.Join();
+                tStatusBar.Text = "Отменено!";
                 button1.Content = "Открыть";
                 isClickStart = false;
-                button1.IsEnabled = true;
             }
         }
 
-        // событие на чтение нового файла
+        //событие на чтение нового файла
         private void eventThatFile(string FileName) {
             this.Dispatcher.Invoke((Action)(() => {
                 tStatusBar.Text = "Обработка \"" + FileName + "\"";
@@ -142,13 +128,12 @@ namespace findOnId {
             this.Dispatcher.Invoke((Action)(() => {
                 tStatusBar.Text = "Готово!";
                 button1.Content = "Открыть";
-                button1.IsEnabled = true;
                 isClickStart = false;
             }));
         }
 
-        // событие на заполнение прогресс бара
-        private void eventProgressBar(int progress, int progressTotal) {
+        //событие на заполнение прогресс бара
+        private void eventProgressBar(int progress) {
             //on WinForm
             //progressBar1.Invoke(new Action(() => 
             //{ 
@@ -156,13 +141,24 @@ namespace findOnId {
             //}));
             //on WPF
             this.Dispatcher.Invoke((Action)(() => {
-                progressBar1.Value = (((double)progress / progressTotal) * 100) + 1;
+                progressBar1.Value = progress + 1;
             }));
         }
-
-        private void Window_Closing(object sender, CancelEventArgs e) {
-
+        //установка максимального значения progressBar1
+        private void eventProgressBarMaxValue(int maxValue) {
+            this.Dispatcher.Invoke((Action)(() => {
+                progressBar1.Maximum = maxValue;
+            }));
         }
-
+        //событие на закрытие окна
+        private void Window_Closing(object sender, CancelEventArgs e) {
+            if (_writeThread != null) {
+                if (_writeThread.IsAlive) {
+                    _writeThread.Abort(); // запускаем исключение catch (ThreadAbortException)
+                    _writeThread.Interrupt();
+                }
+            }
+        }
+        
     }
 }

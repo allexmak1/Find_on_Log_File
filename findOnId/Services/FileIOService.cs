@@ -6,15 +6,20 @@ using System.IO;
 namespace findOnId.Services {
     class FileIOService {
         private readonly string PATH;
-
+        private bool isFileExists { set; get; }
+        public bool getFileExists() {
+            return isFileExists;
+        }
         public FileIOService(string path) {
             PATH = path;
         }
 
         // загружаем из файла
         public BindingList<findOnIdModels> LoadData() {
+            isFileExists = true;
             bool fileExists = File.Exists(PATH);
             if (!fileExists) {
+                isFileExists = false;
                 File.CreateText(PATH).Dispose();
                 return new BindingList<findOnIdModels>();
             }
